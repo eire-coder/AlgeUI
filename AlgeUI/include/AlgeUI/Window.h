@@ -5,12 +5,9 @@
 
 #include "vulkan/vulkan.h"
 
-// Forward-declare GLFWwindow to avoid including the GLFW header here
 struct GLFWwindow;
 
-// Platform-specific includes and definitions for Windows
 #ifdef WL_PLATFORM_WINDOWS
-	// These definitions prevent the heavy Windows.h header from including unnecessary APIs
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -23,6 +20,7 @@ namespace AlgeUI {
 		std::string Title = "AlgeUI";
 		uint32_t Width = 1600;
 		uint32_t Height = 900;
+		bool CustomTitleBar = true;
 	};
 
 	class Window
@@ -43,7 +41,7 @@ namespace AlgeUI {
 		void GetFramebufferSize(int* width, int* height);
 
 	private:
-		void Init();
+		void Init(const WindowSpecification& spec);
 		void Shutdown();
 
 	private:
@@ -59,8 +57,7 @@ namespace AlgeUI {
 		WindowData m_Data;
 
 #ifdef WL_PLATFORM_WINDOWS
-		HWND m_NativeHandle = nullptr; // HWND handle
-		// Static callback requires a static pointer to the original procedure
+		HWND m_NativeHandle = nullptr; 
 		inline static WNDPROC s_OriginalWndProc = nullptr;
 		static LRESULT CALLBACK Win32WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #endif

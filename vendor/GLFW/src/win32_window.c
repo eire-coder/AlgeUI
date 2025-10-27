@@ -51,12 +51,11 @@ static DWORD getWindowStyle(const _GLFWwindow* window)
         if (window->decorated)
         {
             style |= WS_CAPTION;
-
             if (window->resizable)
                 style |= WS_MAXIMIZEBOX | WS_THICKFRAME;
         }
         else
-            style |= WS_POPUP;
+            style |= WS_POPUP | WS_THICKFRAME; // Add this line
     }
 
     return style;
@@ -1135,7 +1134,14 @@ static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
 
         return 0;
     }
-
+    case WM_NCCALCSIZE:
+    {
+        if (!window->decorated)
+        {
+            return 0;
+        }
+        break;
+    }
     case WM_PAINT:
     {
         _glfwInputWindowDamage(window);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Application.h" // We need the full definition of Application
+#include "Application.h" 
 
 #ifdef WL_PLATFORM_WINDOWS
 

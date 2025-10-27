@@ -44,7 +44,7 @@ project "AlgeUIApp"
          "kernel32",
          "shell32",
          "dwmapi",
-         "ole32" -- Add this line for completeness
+         "ole32"
       }
 
    filter "configurations:Debug"

@@ -1,5 +1,6 @@
 #include "AlgeUI/Window.h"
-#include "AlgeUI/Application.h" // Must include for the callback logic
+#include "AlgeUI/Application.h"
+#include "imgui.h" // Required for checking ImGui's mouse state (io.WantCaptureMouse)
 
 #define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
@@ -11,148 +12,172 @@
 #ifdef WL_PLATFORM_WINDOWS
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
+#include <windowsx.h>
+#include <dwmapi.h>
+#pragma comment(lib, "dwmapi.lib") // Link against the DWM API library
 #endif
 
 namespace AlgeUI {
 
-	static void glfw_error_callback(int error, const char* description)
-	{
-		fprintf(stderr, "GLFW Error %d: %s\n", error, description);
-	}
+    static void glfw_error_callback(int error, const char* description)
+    {
+        fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+    }
 
 #ifdef WL_PLATFORM_WINDOWS
-	// This is our new, clean hit-test callback that integrates perfectly with GLFW.
-	// It receives coordinates in CLIENT space, which is what we need for ImGui.
-	static int HitTestCallback(GLFWwindow* window, int x, int y)
-	{
-		Application* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
-		if (!app)
-		{
-			return -1; // Fallback to default if app isn't set yet
-		}
+    // This is the definitive, correct window procedure that will fix the dragging issue.
+    LRESULT CALLBACK Window::Win32WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+    {
+        switch (msg)
+        {
+            // This message is sent when the OS needs to calculate the window's client area.
+            // Returning 0 here effectively removes the standard title bar and borders.
+        case WM_NCCALCSIZE:
+        {
+            if (wParam == TRUE)
+            {
+                return 0;
+            }
+            break;
+        }
 
-		if (glfwGetWindowAttrib(window, GLFW_MAXIMIZED))
-		{
-			// When maximized, we only care about the control box. Let the OS handle the rest.
-			const auto& controlBox = app->GetControlBox();
-			const ImVec2 mousePos = { (float)x, (float)y };
-			if (controlBox.Minimize.Contains(mousePos) ||
-				controlBox.Maximize.Contains(mousePos) ||
-				controlBox.Close.Contains(mousePos))
-			{
-				return HTCLIENT; // Let ImGui handle clicks on buttons
-			}
-			return HTCAPTION; // The rest of the title bar is for dragging to restore
-		}
+        // This is the most important message for custom frames. It asks what part
+        // of the window the cursor is over.
+        case WM_NCHITTEST:
+        {
+            const LONG border_width = 8; // Resize handle thickness
+            const LONG caption_height = 48; // Your custom title bar height
+            RECT windowRect;
+            GetWindowRect(hwnd, &windowRect);
+            long x = GET_X_LPARAM(lParam);
+            long y = GET_Y_LPARAM(lParam);
 
-		// --- BORDER CHECKS (HIGHEST PRIORITY) ---
-		const LONG border_width = 8;
-		int width, height;
-		glfwGetWindowSize(window, &width, &height);
+            // Check for resize handles when not maximized
+            if (!IsZoomed(hwnd))
+            {
+                if (y >= windowRect.top && y < windowRect.top + border_width) return HTTOP;
+                if (y < windowRect.bottom && y >= windowRect.bottom - border_width) return HTBOTTOM;
+                if (x >= windowRect.left && x < windowRect.left + border_width) return HTLEFT;
+                if (x < windowRect.right && x >= windowRect.right - border_width) return HTRIGHT;
+                if (x >= windowRect.left && x < windowRect.left + border_width && y >= windowRect.top && y < windowRect.top + border_width) return HTTOPLEFT;
+                if (x < windowRect.right && x >= windowRect.right - border_width && y >= windowRect.top && y < windowRect.top + border_width) return HTTOPRIGHT;
+                if (x >= windowRect.left && x < windowRect.left + border_width && y < windowRect.bottom && y >= windowRect.bottom - border_width) return HTBOTTOMLEFT;
+                if (x < windowRect.right && x >= windowRect.right - border_width && y < windowRect.bottom && y >= windowRect.bottom - border_width) return HTBOTTOMRIGHT;
+            }
 
-		bool on_left = x >= 0 && x < border_width;
-		bool on_right = x < width && x >= width - border_width;
-		bool on_top = y >= 0 && y < border_width;
-		bool on_bottom = y < height && y >= height - border_width;
+            // Check if the cursor is in our custom title bar area
+            if (y >= windowRect.top && y < windowRect.top + caption_height)
+            {
+                // If the mouse is over an ImGui widget in the title bar, treat it as part of the client area.
+                if (ImGui::GetIO().WantCaptureMouse)
+                {
+                    return HTCLIENT;
+                }
+                // Otherwise, this is our title bar. Tell Windows it's a caption.
+                return HTCAPTION;
+            }
 
-		if (on_top && on_left)    return HTTOPLEFT;
-		if (on_top && on_right)   return HTTOPRIGHT;
-		if (on_bottom && on_left) return HTBOTTOMLEFT;
-		if (on_bottom && on_right)return HTBOTTOMRIGHT;
-		if (on_top)               return HTTOP;
-		if (on_bottom)            return HTBOTTOM;
-		if (on_left)              return HTLEFT;
-		if (on_right)             return HTRIGHT;
+            // Any other part of the window is the client area.
+            return HTCLIENT;
+        }
+        }
 
-		// --- TITLE BAR CHECKS (LOWER PRIORITY) ---
-		const auto& controlBox = app->GetControlBox();
-		const ImVec2 mousePos = { (float)x, (float)y };
-		const LONG caption_height = 75;
-		if (mousePos.y >= 0 && mousePos.y < caption_height)
-		{
-			if (controlBox.Minimize.Contains(mousePos) ||
-				controlBox.Maximize.Contains(mousePos) ||
-				controlBox.Close.Contains(mousePos))
-			{
-				return HTCLIENT; // Let ImGui handle the click.
-			}
-			return HTCAPTION; // Drag the window.
-		}
-
-		return HTCLIENT; // It's the main content area.
-	}
+        // For all other messages, and for default handling of the ones above,
+        // pass them to the original window procedure that we subclassed. This is vital.
+        return CallWindowProc(s_OriginalWndProc, hwnd, msg, wParam, lParam);
+    }
 #endif
 
-	Window::Window(const WindowSpecification& spec)
-	{
-		m_Data.Title = spec.Title;
-		m_Data.Width = spec.Width;
-		m_Data.Height = spec.Height;
-		Init();
-	}
+    Window::Window(const WindowSpecification& spec)
+    {
+        m_Data.Title = spec.Title;
+        m_Data.Width = spec.Width;
+        m_Data.Height = spec.Height;
+        Init(spec);
+    }
 
-	Window::~Window()
-	{
-		Shutdown();
-	}
+    Window::~Window()
+    {
+        Shutdown();
+    }
 
-	void Window::Init()
-	{
-		glfwSetErrorCallback(glfw_error_callback);
-		if (!glfwInit())
-		{
-			std::cerr << "Could not initialize GLFW!" << std::endl;
-			return;
-		}
+    void Window::Init(const WindowSpecification& spec)
+    {
+        glfwSetErrorCallback(glfw_error_callback);
+        if (!glfwInit())
+        {
+            std::cerr << "Could not initialize GLFW!" << std::endl;
+            return;
+        }
 
-		glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-		glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 
-		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		m_WindowHandle = glfwCreateWindow(m_Data.Width, m_Data.Height, m_Data.Title.c_str(), NULL, NULL);
+        if (spec.CustomTitleBar)
+        {
+            // Create an undecorated window if we're using our custom title bar.
+            glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+        }
 
-		// Store a pointer to the Application instance for the callback to use.
-		glfwSetWindowUserPointer(m_WindowHandle, &Application::Get());
-	}
+        m_WindowHandle = glfwCreateWindow(m_Data.Width, m_Data.Height, m_Data.Title.c_str(), NULL, NULL);
 
-	void Window::Shutdown()
-	{
-		glfwDestroyWindow(m_WindowHandle);
-		glfwTerminate();
-	}
+        glfwSetWindowUserPointer(m_WindowHandle, &Application::Get());
 
-	void Window::PollEvents()
-	{
-		glfwPollEvents();
-	}
+#ifdef WL_PLATFORM_WINDOWS
+        if (spec.CustomTitleBar)
+        {
+            m_NativeHandle = glfwGetWin32Window(m_WindowHandle);
 
-	bool Window::ShouldClose()
-	{
-		return glfwWindowShouldClose(m_WindowHandle);
-	}
+            LONG_PTR style = GetWindowLongPtr(m_NativeHandle, GWL_STYLE);
+            // Add styles for resizing and maximize, but NOT WS_CAPTION.
+            style |= WS_MAXIMIZEBOX | WS_THICKFRAME;
+            SetWindowLongPtr(m_NativeHandle, GWL_STYLE, style);
 
-	VkResult Window::CreateVulkanSurface(VkInstance instance, VkSurfaceKHR* surface)
-	{
-		return glfwCreateWindowSurface(instance, m_WindowHandle, nullptr, surface);
-	}
+            SetWindowPos(m_NativeHandle, NULL, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER);
 
-	void Window::SetIcon(const unsigned char* data, int len)
-	{
-		int width, height, channels;
-		stbi_uc* pixels = stbi_load_from_memory(data, len, &width, &height, &channels, 4);
-		if (pixels)
-		{
-			GLFWimage image[1];
-			image[0].width = width;
-			image[0].height = height;
-			image[0].pixels = pixels;
-			glfwSetWindowIcon(m_WindowHandle, 1, image);
-			stbi_image_free(pixels);
-		}
-	}
+            // Subclass the window procedure.
+            s_OriginalWndProc = (WNDPROC)SetWindowLongPtr(m_NativeHandle, GWLP_WNDPROC, (LONG_PTR)Win32WndProc);
+        }
+#endif
+    }
 
-	void Window::GetFramebufferSize(int* width, int* height)
-	{
-		glfwGetFramebufferSize(m_WindowHandle, width, height);
-	}
+    void Window::Shutdown()
+    {
+        glfwDestroyWindow(m_WindowHandle);
+        glfwTerminate();
+    }
+
+    void Window::PollEvents()
+    {
+        glfwPollEvents();
+    }
+
+    bool Window::ShouldClose()
+    {
+        return glfwWindowShouldClose(m_WindowHandle);
+    }
+
+    VkResult Window::CreateVulkanSurface(VkInstance instance, VkSurfaceKHR* surface)
+    {
+        return glfwCreateWindowSurface(instance, m_WindowHandle, nullptr, surface);
+    }
+
+    void Window::SetIcon(const unsigned char* data, int len)
+    {
+        int width, height, channels;
+        stbi_uc* pixels = stbi_load_from_memory(data, len, &width, &height, &channels, 4);
+        if (pixels)
+        {
+            GLFWimage image[1];
+            image[0].width = width;
+            image[0].height = height;
+            image[0].pixels = pixels;
+            glfwSetWindowIcon(m_WindowHandle, 1, image);
+            stbi_image_free(pixels);
+        }
+    }
+
+    void Window::GetFramebufferSize(int* width, int* height)
+    {
+        glfwGetFramebufferSize(m_WindowHandle, width, height);
+    }
 }

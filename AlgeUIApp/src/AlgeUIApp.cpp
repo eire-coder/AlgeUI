@@ -1,41 +1,44 @@
 #include "AlgeUI/Application.h"
 #include "AlgeUI/EntryPoint.h"
-
 #include "imgui.h"
 
-class ExampleLayer : public AlgeUI::Layer
-{
+class ExampleLayer : public AlgeUI::Layer {
 public:
-	virtual void OnUIRender() override
-	{
-		ImGui::Begin("Hello from AlgeUI!");
-		ImGui::Button("My Button");
-		ImGui::End();
-	}
+    virtual void OnUIRender() override {
+        ImGui::Begin("Hello from AlgeUI!"); ImGui::End();
+        if (ImGui::BeginPopup("FilePopup")) {
+            if (ImGui::MenuItem("Exit")) { AlgeUI::Application::Get().Close(); }
+            ImGui::EndPopup();
+        }
+        if (ImGui::BeginPopup("HelpPopup")) {
+            if (ImGui::MenuItem("About")) { /* ... */ }
+            ImGui::EndPopup();
+        }
+    }
 };
 
-AlgeUI::Application* AlgeUI::CreateApplication(int argc, char** argv)
-{
-	AlgeUI::ApplicationSpecification spec;
-	spec.Name = "AlgeUI Example Application";
-	spec.Width = 1280;
-	spec.Height = 720;
+AlgeUI::Application* AlgeUI::CreateApplication(int argc, char** argv) {
+    AlgeUI::ApplicationSpecification spec;
+    spec.Name = "Gideon Engine";
+    spec.CustomTitleBar = true;
+    AlgeUI::Application* app = new AlgeUI::Application(spec);
+    app->PushLayer<ExampleLayer>();
 
-	AlgeUI::Application* app = new AlgeUI::Application(spec);
+    app->SetTitleBarContentCallback([app]() {
+        ImGui::SameLine(0.0f, 5.0f);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.3f, 0.3f, 0.35f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.5f, 0.5f, 0.35f));
 
-	app->PushLayer<ExampleLayer>();
+        if (ImGui::Button("File")) { ImGui::OpenPopup("FilePopup"); }
 
-	app->SetMenubarCallback([app]()
-		{
-			if (ImGui::BeginMenu("File"))
-			{
-				if (ImGui::MenuItem("Exit"))
-				{
-					app->Close();
-				}
-				ImGui::EndMenu();
-			}
-		});
+        // --- THE LAYOUT FIX IS HERE ---
+        ImGui::SameLine(0.0f, 5.0f); // Add spacing between File and Help
 
-	return app;
+        if (ImGui::Button("Help")) { ImGui::OpenPopup("HelpPopup"); }
+
+        ImGui::PopStyleColor(3);
+        });
+
+    return app;
 }
